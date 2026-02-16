@@ -1,0 +1,34 @@
+Protocol: Photo_Delegation_W2_Initial
+
+# Week-2 simplified model:
+# - No IdP yet
+# - A, P, B all have public/private keys
+# - A signs a delegation request for P
+# - B returns scoped data to P
+
+Types: Agent A,P,B;
+       Number Na,Scope,Data;
+       Function pk
+
+Knowledge: A: A,P,B,pk(A),pk(P),pk(B),inv(pk(A));
+           P: A,P,B,pk(A),pk(P),pk(B),inv(pk(P));
+           B: A,P,B,pk(A),pk(P),pk(B),inv(pk(B))
+
+where A!=P, A!=B, P!=B
+
+Actions:
+
+A -> P:
+  {A,P,B,Scope,Na}inv(pk(A))
+
+P -> B:
+  P,
+  {A,P,B,Scope,Na}inv(pk(A))
+
+B -> P:
+  {{B,P,Scope,Data,Na}inv(pk(B))}pk(P)
+
+Goals:
+B authenticates A on Na
+P authenticates B on Data
+Data secret between B,P
