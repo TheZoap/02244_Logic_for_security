@@ -1,0 +1,18 @@
+# Ignore slides (course material)
+Slides/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# VS Code
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Environments
+.env/
+venv/
