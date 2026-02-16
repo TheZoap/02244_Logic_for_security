@@ -1,0 +1,48 @@
+@startuml DelegatedPhotoAccess
+title Delegated, Scoped Photo Access (A -> P -> B via IdP)
+
+autonumber
+actor "A (User)" as A
+participant "P (Service / Delegate)" as P
+participant "B (Photo Server / Resource Server)" as B
+participant "IdP (Trusted Identity Provider)" as IdP
+
+note over A,B
+Goal: A lets P read a limited subset of A's photos on B
+- No sharing of A's credentials with P
+- No access outside delegated scope
+end note
+
+== Authenticate and mint delegation token ==
+A -> IdP: Authenticate (shared password)
+IdP --> A: Auth OK
+
+note right of IdP
+Issue signed delegation token:
+sub = A
+delegate = P
+audience = B
+scope = limited folder
+action = read
+expiry = validity period
+signature = IdP
+end note
+
+IdP --> A: Delegation token (signed)
+
+== Deliver token to delegate ==
+A -> P: Send delegation token
+
+== Delegate accesses photos ==
+P -> B: GET photos\nAuthorization: Bearer <token>
+
+== Server verification ==
+B -> B: Verify signature\nCheck audience\nCheck delegate\nCheck scope\nCheck expiry
+
+alt Token valid
+  B --> P: 200 OK\nReturn photos
+else Invalid / expired / out of scope
+  B --> P: 403 Forbidden
+end
+
+@enduml
