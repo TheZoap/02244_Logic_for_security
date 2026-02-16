@@ -21,21 +21,5 @@ Trust assumptions:
 7. 'B' is trusted to enforce token checks: valid 'IdP' signature, audience='B', delegate='P', scope, rights, and expiry.
 8. The network is controlled by intruder 'I' (Dolev-Yao), while cryptographic primitives are assumed ideal.
 
-## 3. Security Goals
-
-
-## 4. High-Level Protocol Steps
-
-
-## 5. Token and Message Structure
-
-
-## 6. Threats and Limitations
-
-
-## 7. Diagram Notes
-
-
-## 8. Planned AnB Formalization
-
-
+## 3. Diagram Notes
+See diagram in file Protocol_diagram_IML.puml.
