@@ -1,0 +1,41 @@
+Protocol: Photo_Delegation_W3_IdP
+
+# Week-3 model:
+# - A has no key pair
+# - A authenticates to IdP by sending password evidence to IdP (password is not used as an encryption key)
+# - IdP signs delegation token for P to access B
+
+Types: Agent A,P,B,idp;
+       Number Na,Tid,Scope,Data;
+       Function pk,pw,h
+
+Knowledge: A: A,P,B,idp,pk(P),pk(B),pk(idp),pw(A,idp),h;
+           P: A,P,B,idp,pk(P),pk(B),pk(idp),inv(pk(P));
+           B: A,P,B,idp,pk(P),pk(B),pk(idp),inv(pk(B));
+           idp: A,P,B,idp,pk(P),pk(B),pk(idp),inv(pk(idp)),pw(A,idp),h
+
+where A!=P, A!=B, P!=B
+
+Actions:
+
+A -> idp:
+  A,P,B,Scope,Na,h(pw(A,idp),A,P,B,Scope,Na)
+
+idp -> A:
+  {A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+A -> P:
+  {A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+P -> B:
+  P,
+  {A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+B -> P:
+  {{B,P,Scope,Data,Tid}inv(pk(B))}pk(P)
+
+Goals:
+B authenticates idp on Tid
+B authenticates A on Na
+P authenticates B on Data
+Data secret between B,P

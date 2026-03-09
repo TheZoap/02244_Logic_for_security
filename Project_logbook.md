@@ -57,3 +57,99 @@ i -> (x501,2): x43,{x502,x43,x501,Scope(1),Na(1)}_inv(pk(x502))
 - `B` accepts both runs and produces two authenticated responses.
 - This breaks injective-style authentication (`strong_auth`) for goal `B authenticates A on Na`.
 - This replay is expected at this stage, because this first protocol version is intentionally oversimplified to establish a working baseline model in AnB.
+
+## Snapshot 2 (Week 3): IdP-Based Delegation + Lazy Intruder Executability
+Date: 2026-03-09
+
+### Files
+- `protocol_w3.AnB`
+- `Project_logbook.md`
+
+### What Changed from Previous Version (and Why)
+- Added an explicit identity provider participant `idp` (fixed honest agent constant).
+- Removed the simplification that `A` has a public/private key pair.
+- Modeled password knowledge as `pw(A,idp)` and authentication evidence as `h(pw(A,idp),A,P,B,Scope,Na)`.
+- Delegation token is now signed by `idp` and contains `A,P,B,Scope,Na,Tid`.
+- `B` now authorizes based on an `idp`-signed delegation token instead of directly trusting an `A` signature.
+
+### Modeling Considerations (Assumptions and Goals)
+- In line with Week 3 instructions, `A` still knows all public keys initially (temporary simplification).
+- The shared password term `pw(A,idp)` is **not** used as an encryption key; it is only used for authentication evidence.
+- `idp` is modeled as honest and trusted by all parties for signed statements.
+- Goals in this version:
+1. `B authenticates idp on Tid`
+2. `B authenticates A on Na`
+3. `P authenticates B on Data`
+4. `Data secret between B,P`
+
+### Special Task (Week 3): Lazy Intruder Proof That Role `P` Is Executable
+Following the lecture method, instantiate `P` as intruder `i` and keep `A,B,idp` honest.
+
+`P`-role strand in this model:
+1. Incoming from `A`: `Tok = {A,i,B,Scope,Na,Tid}inv(pk(idp))`
+2. Outgoing to `B`: `i,Tok`
+
+Constraint sequence:
+1. Initial intruder knowledge (`M0`) from role setup:
+   `{A,i,B,idp,pk(i),inv(pk(i)),pk(B),pk(idp)}`
+2. After incoming message, knowledge is:
+   `M1 = M0 U {Tok}`
+3. Outgoing obligation:
+   `M1 |- (i,Tok)`
+4. By composition, reduce to sub-goals:
+   `M1 |- i` and `M1 |- Tok`
+5. Both are solved by axiom:
+   `i in M1` and `Tok in M1`
+
+Conclusion:
+- The constraint is solved, so the intruder can produce every required outgoing message of role `P`.
+- Therefore role `P` is executable under the lazy intruder method.
+
+### Problems / Open Issues
+- Replay handling at `B` is still abstract; under multi-session analysis, the same valid token can be replayed to trigger repeated acceptances.
+- This currently violates injective authentication (`strong_auth`) on the token identifier (`Tid`).
+
+### Week 3 OFMC Iteration Log (Executable Versions with Attack Traces)
+Command used:
+```powershell
+ofmc protocol_w3.AnB --numSess 2
+```
+
+1. Executable version V1 (before constraining trusted `IdP`):
+- Result: `ATTACK_FOUND`, goal: `weak_auth`.
+- Attack trace (excerpt):
+```text
+i -> (x301,1): x38,{x302,x38,x301,x210,x211,x212}_inv(pk(i))
+(x301,1) -> i: {{x301,x38,x210,Data(1),x212}_inv(pk(x301))}_(pk(x38))
+```
+- Comment on failure:
+  - OFMC can instantiate the identity provider as intruder (`IdP = i`) in this version.
+  - `B` therefore accepts attacker-signed tokens, violating the trusted-IdP requirement.
+
+2. Executable version V2 (after enforcing honest IdP, but before binding full request fields):
+- Result: `ATTACK_FOUND`, goal: `weak_auth`.
+- Attack trace (excerpt):
+```text
+(x502,1) -> i: x502,x28,x27,Scope(1),Na(1),h(pw(x502,x37),Na(1))
+i -> (x37,1): x502,x38,x501,x410,Na(1),h(pw(x502,x37),Na(1))
+(x37,1) -> i: {x502,x38,x501,x410,Na(1),Tid(2)}_inv(pk(x37))
+i -> (x501,1): x38,{x502,x38,x501,x410,Na(1),Tid(2)}_inv(pk(x37))
+```
+- Comment on failure:
+  - Intruder rewrites delegation fields (`P`, `B`, `Scope`) while preserving a valid authenticator on `Na`.
+  - This version does not satisfy Week 3 intent that `A`'s authenticated request to IdP binds the authorization details.
+
+3. Executable version V3 (current syntax-aligned model with `idp` and bound request fields):
+- Result: `ATTACK_FOUND`, goal: `strong_auth`.
+- Attack trace (excerpt):
+```text
+i -> (idp,1): i,x49,x501,x409,x410,h(pw(i,idp),i,x49,x501,x409,x410)
+(idp,1) -> i: {i,x49,x501,x409,x410,Tid(1)}_inv(pk(idp))
+i -> (x501,1): x49,{i,x49,x501,x409,x410,Tid(1)}_inv(pk(idp))
+(x501,1) -> i: {{x501,x49,x409,Data(2),Tid(1)}_inv(pk(x501))}_(pk(x49))
+i -> (x501,2): x49,{i,x49,x501,x409,x410,Tid(1)}_inv(pk(idp))
+(x501,2) -> i: {{x501,x49,x409,Data(3),Tid(1)}_inv(pk(x501))}_(pk(x49))
+```
+- Comment on failure:
+  - A valid token with the same `Tid` is replayed to `B` in multiple sessions.
+  - `B` accepts repeated token use, breaking injective authentication (`strong_auth`) on token usage.
