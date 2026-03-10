@@ -153,3 +153,56 @@ i -> (x501,2): x49,{i,x49,x501,x409,x410,Tid(1)}_inv(pk(idp))
 - Comment on failure:
   - A valid token with the same `Tid` is replayed to `B` in multiple sessions.
   - `B` accepts repeated token use, breaking injective authentication (`strong_auth`) on token usage.
+
+## Snapshot 3 (Week 4): Typed Formats + Separate Key Lookup
+Date: 2026-03-10
+
+### Files
+- `protocol_w4.AnB`
+- `protocol_w4_key_lookup.AnB`
+- `Protocol_design.md`
+
+### What Changed from Previous Version (and Why)
+- Added a separate key-discovery protocol so `A` no longer starts with the public key of every party.
+- Restricted `A`'s initial knowledge in the main delegation model to `pk(idp)` plus the shared password term.
+- Replaced the previous untagged messages with explicit message-format tags:
+  - `key_req_tag`, `key_resp_tag`
+  - `auth_req_tag`, `deleg_tok_tag`, `deleg_msg_tag`, `access_req_tag`, `data_msg_tag`
+- Used tag constants instead of nested function-format terms because the latter made the protocol non-executable in OFMC when responders needed to reuse parsed fields.
+
+### Security Rationale
+- Distinct message tags reduce the risk that one message can be reinterpreted as another protocol message.
+- The key-discovery protocol isolates trust in key bindings to signed `idp` responses.
+- The main protocol now matches the intended trust model more closely: `A` relies on `idp` for both authentication and public-key discovery.
+
+### Week-4 OFMC Results
+
+Results:
+- `protocol_w4_key_lookup.AnB`: `NO_ATTACK_FOUND`
+- `protocol_w4.AnB`: `ATTACK_FOUND` on `strong_auth`
+
+### Week-4 Attack Status
+- The separate key-lookup protocol verifies successfully once the signed response binds the requester identity `A` together with `(C, pk(C), Nk)`.
+- The main delegation protocol remains vulnerable to replay of the same valid `idp` token at `B`.
+- This is not a type-flaw attack; it is a reuse / injectivity problem on `Tid`.
+
+### Week-4 Type-Flaw Resistance Argument
+To show type-flaw resistance, consider any two non-variable messages `m1` and `m2` in the set of protocol messages `SMP`. Assume `m1` and `m2` have a unifier. Then their outermost constructors must be identical.
+
+In the week-4 models, every protocol message format is distinguished by a unique top-level tag:
+- `key_req_tag` for key lookup requests
+- `key_resp_tag` for key lookup responses
+- `auth_req_tag` for authentication requests from `A` to `idp`
+- `deleg_tok_tag` for `idp`-signed delegation tokens
+- `deleg_msg_tag` for token forwarding from `A` to `P`
+- `access_req_tag` for access requests from `P` to `B`
+- `data_msg_tag` for responses from `B` to `P`
+
+Therefore, if two messages have different protocol types, then they have different top-level tags, and unification fails immediately. For example:
+- `auth_req_tag, A,P,B,Scope,Na,h(...)` cannot unify with `deleg_msg_tag, Tok`
+- `access_req_tag, P, Tok` cannot unify with `data_msg_tag, Resp`
+- `key_req_tag, A,C,Nk` cannot unify with `key_resp_tag, Resp`
+
+The only remaining case is that two messages have the same top-level tag. But then they already belong to the same protocol format by construction, and hence they have the same type.
+
+So for any two non-variable messages in `SMP`, if they have a unifier, they must have the same type. This shows that the week-4 protocols are type-flaw resistant.

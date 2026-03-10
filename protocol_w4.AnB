@@ -1,0 +1,44 @@
+Protocol: Photo_Delegation_W4_Type_Flaw_Resistant
+
+# Week-4 delegation protocol:
+# - A initially knows only pk(idp)
+# - Messages use explicit tag constants to distinguish formats
+# - idp signs the delegation token that P presents to B
+
+Types: Agent A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag;
+       Number Na,Tid,Scope,Data;
+       Function pk,pw,h
+
+Knowledge: A: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(idp),pw(A,idp),h;
+           P: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(P),pk(B),pk(idp),inv(pk(P));
+           B: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(P),pk(B),pk(idp),inv(pk(B));
+           idp: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(P),pk(B),pk(idp),inv(pk(idp)),pw(A,idp),h
+
+where A!=P, A!=B, P!=B
+
+Actions:
+
+A -> idp:
+  auth_req_tag,A,P,B,Scope,Na,h(pw(A,idp),A,P,B,Scope,Na)
+
+idp -> A:
+  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+A -> P:
+  deleg_msg_tag,
+  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+P -> B:
+  access_req_tag,
+  P,
+  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+B -> P:
+  data_msg_tag,
+  {{B,P,Scope,Data,Tid}inv(pk(B))}pk(P)
+
+Goals:
+B authenticates idp on Tid
+B authenticates A on Na
+P authenticates B on Data
+Data secret between B,P

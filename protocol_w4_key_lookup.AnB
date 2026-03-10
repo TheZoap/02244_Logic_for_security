@@ -1,0 +1,28 @@
+Protocol: Photo_Delegation_W4_Key_Lookup
+
+# Week-4 key-discovery protocol:
+# - A initially knows only pk(idp)
+# - A requests the public key of another party from idp
+# - Responses are tagged so request/response formats stay distinct
+
+Types: Agent A,C,idp,key_req_tag,key_resp_tag;
+       Number Nk;
+       Function pk
+
+Knowledge: A: A,C,idp,key_req_tag,key_resp_tag,pk(idp);
+           C: A,C,idp,key_req_tag,key_resp_tag,pk(C),inv(pk(C)),pk(idp);
+           idp: A,C,idp,key_req_tag,key_resp_tag,pk(C),pk(idp),inv(pk(idp))
+
+where A!=C, A!=idp, C!=idp
+
+Actions:
+
+A -> idp:
+  key_req_tag,A,C,Nk
+
+idp -> A:
+  key_resp_tag,
+  {A,C,pk(C),Nk}inv(pk(idp))
+
+Goals:
+A authenticates idp on Nk
