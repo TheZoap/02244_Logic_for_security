@@ -318,3 +318,99 @@ i -> (x501,2): confChCr(i),{{accessreqtag,x53,{delegtoktag,i,x53,x501,x410,x411,
 ```
 
 The final week-5 protocol avoids the immediate secrecy break from the first all-channel variant, but it still inherits the replay weakness already suggested by the lecture: pseudonymous TLS-style channels are useful for replacing transport cryptography, yet they do not provide freshness on their own. As a result, the same valid `idp` token with the same `Tid` can still be reused against `B` in multiple sessions, so the model continues to fail injective authentication (`strong_auth`) on token usage.
+
+## Snapshot 5 (Week 6): Guessable Password Security Test
+Date: 2026-03-13
+
+### Files
+- `protocol_w6.AnB`
+
+### Task
+Verify whether the protocol is secure even if the password `pw(A,idp)` between
+A and the identity provider is a guessable (weak) secret.
+
+### Modeling Approach
+The standard OFMC/Dolev-Yao method for modeling a guessable secret is to make
+it observable on the network.  The week-6 file makes exactly one change to the
+week-5 protocol:
+
+```
+Was  (W5): [A] *->* idp:  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
+Now  (W6):  A   ->  idp:  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
+```
+
+Removing `[A] *->*` drops both guarantees that the pseudonymous channel
+previously provided:
+1. **Confidentiality** – `pw(A,idp)` is now sent in plaintext; the intruder
+   can read it directly.
+2. **Authentication** – the channel no longer binds A as the sender; the
+   intruder can intercept A's message and substitute their own values for P, B,
+   Scope, and Na while keeping A's identity and password.
+
+All other steps (token forwarding, access request, data response) retain the
+week-5 pseudonymous channels and end-to-end crypto.
+
+### OFMC Results
+
+```powershell
+ofmc .\protocol_w6.AnB --numSess 1   # ATTACK_FOUND
+ofmc .\protocol_w6.AnB --numSess 2   # ATTACK_FOUND
+```
+
+Both single-session and two-session runs find the same attack immediately
+(depth 3, ~15-51 nodes visited).
+
+### Attack Trace (--numSess 1)
+```text
+(x502,1) -> i: authreqtag,x502,x31,x30,Scope(1),Na(1),pw(x502,idp)
+i -> (idp,1): authreqtag,x502,x40,x501,x410,x411,pw(x502,idp)
+(idp,1) -> i: {delegtoktag,x502,x40,x501,x410,x411,Tid(2)}_inv(pk(idp))
+i -> (x501,1): confChCr(i),{{accessreqtag,x40,{delegtoktag,x502,x40,x501,x410,x411,Tid(2)}_inv(pk(idp))}_inv(confChCr(i))}_(confChCr(x501))
+(x501,1) -> i: datamsgtag,{{x501,x40,x410,Data(3),Tid(2)}_inv(pk(x501))}_(pk(x40))
+```
+
+Goals violated: `weak_auth` (`B authenticates A on Na`) and data secrecy
+(`secrets(Data(3),...,i)` – data reaches the intruder).
+
+### Interpretation of Attack
+Step-by-step reading (x502 = honest A, x40 = intruder-controlled P,
+x501 = B, x411 = intruder-chosen Na):
+
+1. A sends its auth request in plaintext; the intruder intercepts it.
+2. The intruder **rewrites** P, B, Scope, Na to intruder-controlled values
+   while keeping A's identity `x502` and the captured `pw(x502,idp)`.
+   IdP cannot detect the substitution because there is no binding between
+   the sender identity and the message content.
+3. IdP verifies the password and issues a valid token for
+   `(A=x502, P=x40, B=x501, Scope=x410, Na=x411)` – all chosen by the
+   intruder.
+4. The intruder presents this token to B using their own pseudonymous channel.
+5. B returns data encrypted for `pk(x40)` (the intruder's P), leaking it.
+
+The attack breaks two goals simultaneously:
+- **`B authenticates A on Na`**: B accepted Na=x411, but A only ever
+  produced Na=Na(1). A never participated in the run that Na=x411 belongs to.
+- **Data secrecy**: `Data(3)` is encrypted for the intruder's key and is
+  therefore in the intruder's knowledge.
+
+### Why the `[A]` Channel Matters
+The week-5 attack (token replay via `pw(i,idp)`) is qualitatively different:
+in that trace the intruder uses **their own** identity `i` and their own
+password `pw(i,idp)`.  Here, the intruder uses **A's** password without A's
+consent, which is only possible because the plaintext channel lets them observe
+and then re-use `pw(A,idp)`.
+
+The `[A] *->*` annotation in W5 provides both confidentiality *and* sender
+authentication.  Even if `pw(A,idp)` were publicly known, the `[A]` binding
+prevents the intruder from constructing a message that IdP would attribute to A,
+because the channel itself certifies the sender identity independently of the
+password field.
+
+### Conclusion
+The protocol is **not secure** when `pw(A,idp)` is a guessable (observable)
+secret and no channel-level sender authentication is in place.  The
+week-5 design with `[A] *->* idp:` is necessary and sufficient to protect
+against this class of attack: the authenticated channel makes the password
+evidence redundant and prevents the intruder from substituting their own
+delegation parameters into A's request.
+
