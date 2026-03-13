@@ -163,6 +163,7 @@ Date: 2026-03-10
 - `Protocol_design.md`
 
 ### What Changed from Previous Version (and Why)
+
 - Added a separate key-discovery protocol so `A` no longer starts with the public key of every party.
 - Restricted `A`'s initial knowledge in the main delegation model to `pk(idp)` plus the shared password term.
 - Replaced the previous untagged messages with explicit message-format tags:
@@ -206,3 +207,114 @@ Therefore, if two messages have different protocol types, then they have differe
 The only remaining case is that two messages have the same top-level tag. But then they already belong to the same protocol format by construction, and hence they have the same type.
 
 So for any two non-variable messages in `SMP`, if they have a unifier, they must have the same type. This shows that the week-4 protocols are type-flaw resistant.
+
+## Snapshot 4 (Week 5): Pseudonymous Channels
+Date: 2026-03-13
+
+### Files
+- `protocol_w5.AnB`
+- `Project_logbook.md`
+
+
+### Week-5 Design Decision
+The week-5 variant replaces transport-level protection with pseudonymous secure channels wherever that does not destroy the authorization logic:
+1. `A -> idp` becomes `[A] *->* idp`, so `A` can send `pw(A,idp)` directly over the TLS-style channel instead of hashing it into a message authenticator.
+2. `A -> P` becomes `[A] *->* P`, because the token-forwarding step only needs confidential and authenticated transport to the service endpoint.
+3. `P -> B` becomes `[P] *->* B`, because the access request is also a client-to-server TLS-style transmission.
+4. The `idp` signature on the delegation token is retained, because `B` must still verify an authorization statement that survives forwarding through `A` and `P`.
+5. The `B -> P` payload encryption/signature from week 4 is also retained in the final week-5 file, because OFMC found an immediate confidentiality break when that last step was replaced by a pure pseudonymous channel.
+
+### Week-5 Iteration V1: Replace Every Transport Step by Pseudonymous Channels
+Command used:
+```powershell
+ofmc .\protocol_w5.AnB --numSess 2
+```
+
+Result:
+- `ATTACK_FOUND`
+- Goal violated: `secrets`
+
+Protocol version that produced the attack:
+```anb
+Protocol: Photo_Delegation_W5_Pseudonymous_Channels
+
+# Week-5 delegation protocol:
+# - Replace transport cryptography with pseudonymous secure channels
+#   where the server side is authenticated
+# - Keep only the idp signature that must survive forwarding to B
+# - Pseudonymous channels do not themselves guarantee freshness
+
+Types: Agent A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag;
+       Number Na,Tid,Scope,Data;
+       Function pk,pw
+
+Knowledge: A: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pw(A,idp);
+           P: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(idp);
+           B: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(idp);
+           idp: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,pk(idp),inv(pk(idp)),pw(A,idp)
+
+where A!=P, A!=B, P!=B
+
+Actions:
+
+[A] *->* idp:
+  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
+
+idp *->* [A]:
+  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+[A] *->* P:
+  deleg_msg_tag,
+  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+[P] *->* B:
+  access_req_tag,
+  P,
+  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+
+B *->* [P]:
+  data_msg_tag,
+  B,Scope,Data,Tid
+
+Goals:
+B authenticates idp on Tid
+B authenticates A on Na
+P authenticates B on Data
+Data secret between B,P
+```
+
+Attack trace:
+```text
+i -> (idp,1): confChCr(i),{{authreqtag,i,x40,x39,x308,x309,pw(i,idp)}_inv(confChCr(i))}_(confChCr(idp))
+(idp,1) -> i: {{{delegtoktag,i,x40,x39,x308,x309,Tid(1)}_inv(pk(idp))}_inv(authChCr(idp))}_(confChCr(i))
+i -> (x39,1): confChCr(i),{{accessreqtag,x40,{delegtoktag,i,x40,x39,x308,x309,Tid(1)}_inv(pk(idp))}_inv(confChCr(i))}_(confChCr(x39))
+(x39,1) -> i: {{datamsgtag,x39,x308,Data(2),Tid(1)}_inv(authChCr(x39))}_(confChCr(i))
+```
+
+Interpretation:
+- This version replaced even the final `B -> P` response by `B *->* [P]`.
+- OFMC shows that `B` then returns `Data` on the same pseudonymous channel that carried the request.
+- That is too weak for this protocol: `B` no longer has a cryptographic way to bind the response to the registered delegate `P`.
+- So a pure channel-based replacement is not safe here, even though it matches the TLS abstraction locally.
+
+### Week-5 Final Snapshot: Keep Only the Necessary End-to-End Crypto
+The final file `[protocol_w5.AnB]` keeps the `idp`-signed token and restores the week-4 encrypted/signed response from `B` to `P`, while still replacing:
+- `A -> idp` by `[A] *->* idp`
+- `A -> P` by `[A] *->* P`
+- `P -> B` by `[P] *->* B`
+
+OFMC results for the final week-5 file:
+- `ofmc .\protocol_w5.AnB --numSess 1` -> `NO_ATTACK_FOUND`
+- `ofmc .\protocol_w5.AnB --numSess 2` -> `ATTACK_FOUND` on `strong_auth`
+
+Attack trace for the final week-5 file:
+```text
+i -> (idp,1): confChCr(i),{{authreqtag,i,x53,x501,x410,x411,pw(i,idp)}_inv(confChCr(i))}_(confChCr(idp))
+(idp,1) -> i: {{{delegtoktag,i,x53,x501,x410,x411,Tid(1)}_inv(pk(idp))}_inv(authChCr(idp))}_(confChCr(i))
+i -> (x501,1): confChCr(i),{{accessreqtag,x53,{delegtoktag,i,x53,x501,x410,x411,Tid(1)}_inv(pk(idp))}_inv(confChCr(i))}_(confChCr(x501))
+(x501,1) -> i: datamsgtag,{{x501,x53,x410,Data(2),Tid(1)}_inv(pk(x501))}_(pk(x53))
+i -> (x501,2): confChCr(i),{{accessreqtag,x53,{delegtoktag,i,x53,x501,x410,x411,Tid(1)}_inv(pk(idp))}_inv(confChCr(i))}_(confChCr(x501))
+(x501,2) -> i: datamsgtag,{{x501,x53,x410,Data(3),Tid(1)}_inv(pk(x501))}_(pk(x53))
+```
+
+The final week-5 protocol avoids the immediate secrecy break from the first all-channel variant, but it still inherits the replay weakness already suggested by the lecture: pseudonymous TLS-style channels are useful for replacing transport cryptography, yet they do not provide freshness on their own. As a result, the same valid `idp` token with the same `Tid` can still be reused against `B` in multiple sessions, so the model continues to fail injective authentication (`strong_auth`) on token usage.
