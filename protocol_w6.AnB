@@ -1,46 +1,60 @@
-Protocol: Photo_Delegation_W6_Guessable_Password_Secure
+Protocol: Photo_Delegation_W6_Guessable_Password_With_B_Freshness
 
 # Week-6 delegation protocol:
 # - Verify security when pw(A,idp) is a guessable (weak) secret
 # - Cover nonce Ka is encrypted alongside pw so the intruder cannot
-#   test password guesses offline (Na is revealed in the signed token,
-#   but Ka never appears outside the step-1 ciphertext)
+#   test password guesses offline
+# - B issues a fresh session nonce Nb that is signed into the delegation
+#   token, blocking replay of old tokens at B
 
-Types: Agent A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag;
-       Number Na,Ka,Tid,Scope,Data;
+Types: Agent A,P,B,idp,start_req_tag,challenge_tag,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag;
+       Number Na,Nb,Ka,Tid,Scope,Data;
        Function pk,pw
 
-Knowledge: A:   A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
+Knowledge: A:   A,P,B,idp,start_req_tag,challenge_tag,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
                 pk(idp),pw(A,idp);
-           P:   A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
+           P:   A,P,B,idp,start_req_tag,challenge_tag,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
                 pk(P),pk(B),pk(idp),inv(pk(P));
-           B:   A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
+           B:   A,P,B,idp,start_req_tag,challenge_tag,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
                 pk(P),pk(B),pk(idp),inv(pk(B));
-           idp: A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
+           idp: A,P,B,idp,start_req_tag,challenge_tag,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
                 pk(idp),inv(pk(idp)),pw(A,idp)
 
 where A!=P, A!=B, P!=B
 
 Actions:
 
+[P] *->* B:
+  start_req_tag,
+  P
+
+B *->* [P]:
+  challenge_tag,
+  B,Nb
+
+P -> A:
+  challenge_tag,
+  B,Nb
+
 A -> idp:
-  {auth_req_tag,A,P,B,Scope,Na,Ka,pw(A,idp)}pk(idp)
+  {auth_req_tag,A,P,B,Scope,Na,Nb,Ka,pw(A,idp)}pk(idp)
 
 idp -> A:
-  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+  {deleg_tok_tag,A,P,B,Scope,Na,Nb,Tid}inv(pk(idp))
 
 [A] *->* P:
   deleg_msg_tag,
-  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+  {deleg_tok_tag,A,P,B,Scope,Na,Nb,Tid}inv(pk(idp))
 
 [P] *->* B:
   access_req_tag,
   P,
-  {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
+  Nb,
+  {deleg_tok_tag,A,P,B,Scope,Na,Nb,Tid}inv(pk(idp))
 
 B -> P:
   data_msg_tag,
-  {{B,P,Scope,Data,Tid}inv(pk(B))}pk(P)
+  {{B,P,Scope,Data,Tid,Nb}inv(pk(B))}pk(P)
 
 Goals:
 B authenticates idp on Tid
