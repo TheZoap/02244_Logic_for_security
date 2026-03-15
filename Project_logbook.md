@@ -319,98 +319,99 @@ i -> (x501,2): confChCr(i),{{accessreqtag,x53,{delegtoktag,i,x53,x501,x410,x411,
 
 The final week-5 protocol avoids the immediate secrecy break from the first all-channel variant, but it still inherits the replay weakness already suggested by the lecture: pseudonymous TLS-style channels are useful for replacing transport cryptography, yet they do not provide freshness on their own. As a result, the same valid `idp` token with the same `Tid` can still be reused against `B` in multiple sessions, so the model continues to fail injective authentication (`strong_auth`) on token usage.
 
-## Snapshot 5 (Week 6): Guessable Password Security Test
-Date: 2026-03-13
+## Snapshot 5 (Week 6): Guessable Password Security
+Date: 2026-03-15
 
 ### Files
 - `protocol_w6.AnB`
 
 ### Task
-Verify whether the protocol is secure even if the password `pw(A,idp)` between
-A and the identity provider is a guessable (weak) secret.
+Special task of the week: verify that the protocol is secure even if the
+password `pw(A,idp)` between A and the identity provider is a guessable
+(weak) secret.
 
-### Modeling Approach
-The standard OFMC/Dolev-Yao method for modeling a guessable secret is to make
-it observable on the network.  The week-6 file makes exactly one change to the
-week-5 protocol:
+### Step 1 — Exposing the Vulnerability
+
+The standard OFMC method for modeling a guessable secret is to expose it on
+the network. As a first step, the week-5 authenticated channel to idp was
+replaced with a plain public channel and the password sent in plaintext:
 
 ```
-Was  (W5): [A] *->* idp:  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
-Now  (W6):  A   ->  idp:  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
+Was (W5): [A] *->* idp: auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
+Try (W6):  A   ->  idp: auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
 ```
 
-Removing `[A] *->*` drops both guarantees that the pseudonymous channel
-previously provided:
-1. **Confidentiality** – `pw(A,idp)` is now sent in plaintext; the intruder
-   can read it directly.
-2. **Authentication** – the channel no longer binds A as the sender; the
-   intruder can intercept A's message and substitute their own values for P, B,
-   Scope, and Na while keeping A's identity and password.
+OFMC immediately finds an attack (`--numSess 1`, depth 3):
 
-All other steps (token forwarding, access request, data response) retain the
-week-5 pseudonymous channels and end-to-end crypto.
-
-### OFMC Results
-
-```powershell
-ofmc .\protocol_w6.AnB --numSess 1   # ATTACK_FOUND
-ofmc .\protocol_w6.AnB --numSess 2   # ATTACK_FOUND
-```
-
-Both single-session and two-session runs find the same attack immediately
-(depth 3, ~15-51 nodes visited).
-
-### Attack Trace (--numSess 1)
 ```text
 (x502,1) -> i: authreqtag,x502,x31,x30,Scope(1),Na(1),pw(x502,idp)
 i -> (idp,1): authreqtag,x502,x40,x501,x410,x411,pw(x502,idp)
 (idp,1) -> i: {delegtoktag,x502,x40,x501,x410,x411,Tid(2)}_inv(pk(idp))
-i -> (x501,1): confChCr(i),{{accessreqtag,x40,{delegtoktag,x502,x40,x501,x410,x411,Tid(2)}_inv(pk(idp))}_inv(confChCr(i))}_(confChCr(x501))
+i -> (x501,1): confChCr(i),{{accessreqtag,...}_inv(confChCr(i))}_(confChCr(x501))
 (x501,1) -> i: datamsgtag,{{x501,x40,x410,Data(3),Tid(2)}_inv(pk(x501))}_(pk(x40))
 ```
 
-Goals violated: `weak_auth` (`B authenticates A on Na`) and data secrecy
-(`secrets(Data(3),...,i)` – data reaches the intruder).
+The intruder intercepts A's plaintext message, copies `pw(A,idp)`, rewrites
+P, B, Scope, and Na to intruder-controlled values, and sends the modified
+request to idp. IdP cannot detect the substitution and issues a valid token
+for the intruder's chosen parameters. B then returns data encrypted for the
+intruder's key, violating both `B authenticates A on Na` and data secrecy.
 
-### Interpretation of Attack
-Step-by-step reading (x502 = honest A, x40 = intruder-controlled P,
-x501 = B, x411 = intruder-chosen Na):
+### Step 2 — First Fix Attempt and Why It Fails
 
-1. A sends its auth request in plaintext; the intruder intercepts it.
-2. The intruder **rewrites** P, B, Scope, Na to intruder-controlled values
-   while keeping A's identity `x502` and the captured `pw(x502,idp)`.
-   IdP cannot detect the substitution because there is no binding between
-   the sender identity and the message content.
-3. IdP verifies the password and issues a valid token for
-   `(A=x502, P=x40, B=x501, Scope=x410, Na=x411)` – all chosen by the
-   intruder.
-4. The intruder presents this token to B using their own pseudonymous channel.
-5. B returns data encrypted for `pk(x40)` (the intruder's P), leaking it.
+The obvious fix is to encrypt the auth request under `pk(idp)` so the password
+is no longer visible:
 
-The attack breaks two goals simultaneously:
-- **`B authenticates A on Na`**: B accepted Na=x411, but A only ever
-  produced Na=Na(1). A never participated in the run that Na=x411 belongs to.
-- **Data secrecy**: `Data(3)` is encrypted for the intruder's key and is
-  therefore in the intruder's knowledge.
+```
+A -> idp: {auth_req_tag,A,P,B,Scope,Na,pw(A,idp)}pk(idp)
+```
 
-### Why the `[A]` Channel Matters
-The week-5 attack (token replay via `pw(i,idp)`) is qualitatively different:
-in that trace the intruder uses **their own** identity `i` and their own
-password `pw(i,idp)`.  Here, the intruder uses **A's** password without A's
-consent, which is only possible because the plaintext channel lets them observe
-and then re-use `pw(A,idp)`.
+OFMC still finds a `guesswhat` attack. The reason: `Na` also appears in the
+signed delegation token returned by idp in step 2, which is only signed (not
+encrypted) and therefore readable by anyone. Once the intruder learns `Na`
+from the token, they can reconstruct the step-1 ciphertext with a guessed
+password and verify the guess offline.
 
-The `[A] *->*` annotation in W5 provides both confidentiality *and* sender
-authentication.  Even if `pw(A,idp)` were publicly known, the `[A]` binding
-prevents the intruder from constructing a message that IdP would attribute to A,
-because the channel itself certifies the sender identity independently of the
-password field.
+### Step 3 — Cover-Nonce Fix
+
+The fix, following the week-6 slide pattern `A->B: { A, pw(A,B), K }pk(B)`,
+is to add a dedicated **cover nonce `Ka`** inside the step-1 encryption:
+
+```
+Now (W6): A -> idp: {auth_req_tag,A,P,B,Scope,Na,Ka,pw(A,idp)}pk(idp)
+```
+
+`Ka` is fresh and **never appears anywhere else** in the protocol. Even after
+the intruder learns `Na` from the signed token, they cannot reconstruct the
+ciphertext without also knowing `Ka`, making offline password verification
+infeasible. Additional changes: `Ka` declared as `Number`, `pk(idp)` added to
+A's initial knowledge, and goal `pw(A,idp) guessable secret between A,idp` added.
+
+### OFMC Results (Final Protocol)
+
+```powershell
+ofmc .\protocol_w6.AnB --numSess 1   # NO_ATTACK_FOUND
+ofmc .\protocol_w6.AnB --numSess 2   # ATTACK_FOUND (strong_auth, pre-existing Tid replay)
+```
+
+**`--numSess 1`** — all five goals satisfied:
+
+| Goal | Result |
+|------|--------|
+| `B authenticates idp on Tid` | PASS |
+| `B authenticates A on Na` | PASS |
+| `P authenticates B on Data` | PASS |
+| `Data secret between B,P` | PASS |
+| `pw(A,idp) guessable secret between A,idp` | PASS |
+
+**`--numSess 2`** — `ATTACK_FOUND` on `strong_auth` only. The intruder
+authenticates as itself using `pw(i,idp)`, obtains a valid token with `Tid(1)`,
+and replays it to B in a second session. This is the pre-existing Tid replay
+vulnerability present since week 3; the `guesswhat` goal is not violated.
 
 ### Conclusion
-The protocol is **not secure** when `pw(A,idp)` is a guessable (observable)
-secret and no channel-level sender authentication is in place.  The
-week-5 design with `[A] *->* idp:` is necessary and sufficient to protect
-against this class of attack: the authenticated channel makes the password
-evidence redundant and prevents the intruder from substituting their own
-delegation parameters into A's request.
-
+The cover-nonce technique successfully defeats offline dictionary attacks even
+when `pw(A,idp)` is declared guessable. The special task of week 6 is
+satisfied: the protocol is secure against guessable passwords. The only
+remaining failure is the unrelated Tid replay, which would require B to
+maintain a replay cache to fix.

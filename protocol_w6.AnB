@@ -1,35 +1,17 @@
-Protocol: Photo_Delegation_W6_Guessable_Password
+Protocol: Photo_Delegation_W6_Guessable_Password_Secure
 
-# Week-6 protocol: Guessable password security test
-#
-# Task: Verify whether the protocol is secure even when pw(A,idp) is a
-#       guessable (weak) secret.
-#
-# Modeling approach:
-# - The A->idp authentication step uses a PUBLIC channel (A -> idp:) with
-#   pw(A,idp) sent in PLAINTEXT.  This is the standard OFMC way to model a
-#   "guessable secret": the Dolev-Yao intruder observes pw directly on the
-#   network, which is equivalent to a successful offline dictionary attack.
-# - With --numSess 2 the intruder intercepts A's first message in session 1,
-#   learns pw(A,idp), then uses it to impersonate A to IdP in session 2.
-# - All other steps retain W5's pseudonymous secure channels and the
-#   end-to-end IdP-signed token that B must verify.
-#
-# Key change from W5:
-#   Was:  [A] *->* idp:  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
-#   Now:  A    ->   idp: auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
-#
-# Expected result: ATTACK_FOUND (--numSess 2)
-# Attack: intruder captures pw(A,idp) from session 1, then authenticates to
-#         IdP as A with fresh Na in session 2, obtaining a valid delegation
-#         token.  This breaks B authenticates A on Na.
+# Week-6 delegation protocol:
+# - Verify security when pw(A,idp) is a guessable (weak) secret
+# - Cover nonce Ka is encrypted alongside pw so the intruder cannot
+#   test password guesses offline (Na is revealed in the signed token,
+#   but Ka never appears outside the step-1 ciphertext)
 
 Types: Agent A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag;
-       Number Na,Tid,Scope,Data;
+       Number Na,Ka,Tid,Scope,Data;
        Function pk,pw
 
 Knowledge: A:   A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
-                pw(A,idp);
+                pk(idp),pw(A,idp);
            P:   A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
                 pk(P),pk(B),pk(idp),inv(pk(P));
            B:   A,P,B,idp,auth_req_tag,deleg_tok_tag,deleg_msg_tag,access_req_tag,data_msg_tag,
@@ -41,33 +23,21 @@ where A!=P, A!=B, P!=B
 
 Actions:
 
-# Step 1: A authenticates to IdP using password sent in PLAINTEXT over a
-# public channel.  Removing [A]*->* means the channel no longer guarantees
-# A's identity; pw(A,idp) is the sole authentication credential and is now
-# visible to the Dolev-Yao intruder.
 A -> idp:
-  auth_req_tag,A,P,B,Scope,Na,pw(A,idp)
+  {auth_req_tag,A,P,B,Scope,Na,Ka,pw(A,idp)}pk(idp)
 
-# Step 2: IdP verifies the password field, issues a signed delegation token.
-# The response is signed, so A can verify authenticity without a secure channel.
 idp -> A:
   {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
 
-# Step 3: A forwards the delegation token to P (pseudonymous authenticated
-# channel retained from W5 -- A's identity is still authenticated toward P).
 [A] *->* P:
   deleg_msg_tag,
   {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
 
-# Step 4: P presents the delegation token to B (pseudonymous authenticated
-# channel retained from W5 -- P's identity is authenticated toward B).
 [P] *->* B:
   access_req_tag,
   P,
   {deleg_tok_tag,A,P,B,Scope,Na,Tid}inv(pk(idp))
 
-# Step 5: B returns scoped data to P (encrypted for P and signed by B,
-# providing end-to-end integrity and confidentiality -- retained from W4/W5).
 B -> P:
   data_msg_tag,
   {{B,P,Scope,Data,Tid}inv(pk(B))}pk(P)
@@ -77,3 +47,4 @@ B authenticates idp on Tid
 B authenticates A on Na
 P authenticates B on Data
 Data secret between B,P
+pw(A,idp) guessable secret between A,idp
